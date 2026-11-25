@@ -319,6 +319,10 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
                 </button>
 
                 <PWAInstallButton />
+
+                <span className="ml-auto text-[11px] font-medium tracking-wide text-amber-300/80 whitespace-nowrap">
+                  Koncepcja i realizacja: Artur Wierzbicki
+                </span>
               </div>
             </div>
           )}

@@ -52,55 +52,74 @@ class SoundEngine {
   }
 
   /**
-   * Ciche, krystaliczne stuknięcie grotem bursztynowej strzałki o szklaną taflę ekranu.
+   * Szlachetny, krótki, czysty rezonans uderzenia mosiądzu lub srebra o kryształową ściankę
+   * (wysokie składowe harmoniczne + subtelny pogłos).
    */
-  public playGlassTap(intensity = 0.65): void {
+  public playGlassTap(intensity = 0.7): void {
     const ctx = this.ensureReady();
     if (!ctx) return;
 
     const now = ctx.currentTime;
-    const vol = Math.min(1, Math.max(0.15, intensity));
+    const vol = Math.min(1, Math.max(0.18, intensity));
 
-    // Rezonans szkła (wysokie składowe modalne)
-    const osc1 = ctx.createOscillator();
-    const osc2 = ctx.createOscillator();
-    const bodyOsc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    const bodyGain = ctx.createGain();
+    // Szlachetne składowe metaliczne mosiądzu / srebra
+    const baseFreq = 1680 + Math.random() * 140;
+    const partials = [
+      { ratio: 1.0, amp: 0.11, decay: 0.24 },
+      { ratio: 2.0, amp: 0.065, decay: 0.16 },
+      { ratio: 2.756, amp: 0.045, decay: 0.12 },
+      { ratio: 4.12, amp: 0.025, decay: 0.08 },
+    ];
 
-    osc1.type = 'sine';
-    osc1.frequency.setValueAtTime(2480 + Math.random() * 220, now);
-    osc1.frequency.exponentialRampToValueAtTime(1920, now + 0.045);
+    const dryBus = ctx.createGain();
+    dryBus.gain.value = vol;
+    dryBus.connect(ctx.destination);
 
-    osc2.type = 'sine';
-    osc2.frequency.setValueAtTime(4150 + Math.random() * 300, now);
-    osc2.frequency.exponentialRampToValueAtTime(3400, now + 0.032);
+    // Subtelny pogłos (krótki delay z filtrowanym sprzężeniem)
+    const delay = ctx.createDelay(0.2);
+    delay.delayTime.value = 0.058;
+    const echoFilter = ctx.createBiquadFilter();
+    echoFilter.type = 'lowpass';
+    echoFilter.frequency.value = 3400;
+    const echoGain = ctx.createGain();
+    echoGain.gain.value = 0.24 * vol;
 
-    bodyOsc.type = 'triangle';
-    bodyOsc.frequency.setValueAtTime(340, now);
-    bodyOsc.frequency.exponentialRampToValueAtTime(110, now + 0.038);
+    dryBus.connect(delay);
+    delay.connect(echoFilter);
+    echoFilter.connect(echoGain);
+    echoGain.connect(ctx.destination);
 
-    gain.gain.setValueAtTime(0.001, now);
-    gain.gain.linearRampToValueAtTime(0.11 * vol, now + 0.002);
-    gain.gain.exponentialRampToValueAtTime(0.0005, now + 0.065);
+    partials.forEach((p) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(baseFreq * p.ratio, now);
 
-    bodyGain.gain.setValueAtTime(0.001, now);
-    bodyGain.gain.linearRampToValueAtTime(0.08 * vol, now + 0.002);
-    bodyGain.gain.exponentialRampToValueAtTime(0.0005, now + 0.042);
+      gain.gain.setValueAtTime(0.0005, now);
+      gain.gain.linearRampToValueAtTime(p.amp, now + 0.002);
+      gain.gain.exponentialRampToValueAtTime(0.0002, now + p.decay);
 
-    osc1.connect(gain);
-    osc2.connect(gain);
-    bodyOsc.connect(bodyGain);
-    gain.connect(ctx.destination);
-    bodyGain.connect(ctx.destination);
+      osc.connect(gain);
+      gain.connect(dryBus);
+      osc.start(now);
+      osc.stop(now + p.decay + 0.02);
+    });
 
-    osc1.start(now);
-    osc2.start(now);
-    bodyOsc.start(now);
+    // Krótki impuls samego styku metalu z kryształem
+    const strikeOsc = ctx.createOscillator();
+    const strikeGain = ctx.createGain();
+    strikeOsc.type = 'triangle';
+    strikeOsc.frequency.setValueAtTime(520, now);
+    strikeOsc.frequency.exponentialRampToValueAtTime(190, now + 0.024);
 
-    osc1.stop(now + 0.07);
-    osc2.stop(now + 0.07);
-    bodyOsc.stop(now + 0.05);
+    strikeGain.gain.setValueAtTime(0.001, now);
+    strikeGain.gain.linearRampToValueAtTime(0.06 * vol, now + 0.0015);
+    strikeGain.gain.exponentialRampToValueAtTime(0.0002, now + 0.028);
+
+    strikeOsc.connect(strikeGain);
+    strikeGain.connect(ctx.destination);
+    strikeOsc.start(now);
+    strikeOsc.stop(now + 0.032);
   }
 
   /**
