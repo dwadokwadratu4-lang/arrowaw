@@ -6,6 +6,7 @@ import * as THREE from 'three';
 export function createAmberVeinTexture(maxAnisotropy = 4): {
   map: THREE.CanvasTexture;
   roughnessMap: THREE.CanvasTexture;
+  bumpMap: THREE.CanvasTexture;
 } {
   const size = 512;
   const colorCanvas = document.createElement('canvas');
@@ -38,14 +39,14 @@ export function createAmberVeinTexture(maxAnisotropy = 4): {
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fillStyle =
       Math.random() > 0.35
-        ? `rgba(255, 232, 145, ${0.12 + Math.random() * 0.28})`
-        : `rgba(120, 42, 8, ${0.14 + Math.random() * 0.25})`;
+        ? `rgba(255, 232, 145, ${0.14 + Math.random() * 0.28})`
+        : `rgba(120, 42, 8, ${0.14 + Math.random() * 0.22})`;
     ctx.fill();
   }
 
   // Złote żyłkowanie (organiczne rozgałęzienia)
   ctx.lineCap = 'round';
-  for (let v = 0; v < 26; v++) {
+  for (let v = 0; v < 28; v++) {
     let x = Math.random() * size;
     let y = Math.random() * size;
     let angle = Math.random() * Math.PI * 2;
@@ -60,8 +61,8 @@ export function createAmberVeinTexture(maxAnisotropy = 4): {
     }
     ctx.strokeStyle =
       v % 3 === 0
-        ? 'rgba(255, 250, 210, 0.72)'
-        : 'rgba(251, 191, 36, 0.52)';
+        ? 'rgba(255, 250, 210, 0.78)'
+        : 'rgba(251, 191, 36, 0.55)';
     ctx.lineWidth = 1.2 + Math.random() * 2.4;
     ctx.stroke();
   }
@@ -77,7 +78,7 @@ export function createAmberVeinTexture(maxAnisotropy = 4): {
   roughCanvas.width = 256;
   roughCanvas.height = 256;
   const rCtx = roughCanvas.getContext('2d')!;
-  rCtx.fillStyle = '#2a2a2a';
+  rCtx.fillStyle = '#333333';
   rCtx.fillRect(0, 0, 256, 256);
   for (let i = 0; i < 40; i++) {
     rCtx.strokeStyle = 'rgba(130,130,130,0.45)';
@@ -98,7 +99,38 @@ export function createAmberVeinTexture(maxAnisotropy = 4): {
   roughnessMap.wrapS = THREE.RepeatWrapping;
   roughnessMap.wrapT = THREE.RepeatWrapping;
 
-  return { map, roughnessMap };
+  // Delikatna faktura kutego rzemiosła (bumpMap z wgłębieniami po młotku kowalskim)
+  const bumpCanvas = document.createElement('canvas');
+  bumpCanvas.width = 256;
+  bumpCanvas.height = 256;
+  const bCtx = bumpCanvas.getContext('2d')!;
+  bCtx.fillStyle = '#808080';
+  bCtx.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 220; i++) {
+    const cx = Math.random() * 256;
+    const cy = Math.random() * 256;
+    const rx = 5 + Math.random() * 11;
+    const ry = 4 + Math.random() * 9;
+    const rot = Math.random() * Math.PI;
+    const g = bCtx.createRadialGradient(cx, cy, 1, cx, cy, Math.max(rx, ry));
+    g.addColorStop(0, 'rgba(52, 52, 52, 0.55)');
+    g.addColorStop(0.75, 'rgba(135, 135, 135, 0.35)');
+    g.addColorStop(1, 'rgba(128, 128, 128, 0)');
+    bCtx.save();
+    bCtx.translate(cx, cy);
+    bCtx.rotate(rot);
+    bCtx.scale(1, ry / rx);
+    bCtx.beginPath();
+    bCtx.arc(0, 0, rx, 0, Math.PI * 2);
+    bCtx.fillStyle = g;
+    bCtx.fill();
+    bCtx.restore();
+  }
+  const bumpMap = new THREE.CanvasTexture(bumpCanvas);
+  bumpMap.wrapS = THREE.RepeatWrapping;
+  bumpMap.wrapT = THREE.RepeatWrapping;
+
+  return { map, roughnessMap, bumpMap };
 }
 
 /**
