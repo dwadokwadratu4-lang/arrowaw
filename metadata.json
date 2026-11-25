@@ -1,0 +1,6 @@
+{
+  "name": "Czarna Woda – Magiczny Kompas Zamku Piastowskiego",
+  "description": "Mobilny kompas WebGL / Three.js prowadzący do Zamku Piastowskiego w Raciborzu w tafli czarnej wody. Projekt DRAGON EYE, autor: Artur Wierzbicki.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
