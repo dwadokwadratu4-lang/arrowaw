@@ -279,6 +279,70 @@ class SoundEngine {
     growl1.stop(now + 1.6);
     sub.stop(now + 1.6);
   }
+
+  private murmurSource: AudioBufferSourceNode | null = null;
+  private murmurGain: GainNode | null = null;
+
+  /**
+   * Cichy szum głębiny po zanurzeniu kompasu (po 15s bezruchu).
+   */
+  public startAbyssMurmur(): void {
+    const ctx = this.ensureReady();
+    if (!ctx || !this.noiseBuffer || this.murmurSource) return;
+
+    const now = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer;
+    src.loop = true;
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(145, now);
+    filter.Q.value = 0.8;
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(0.028, now + 1.4);
+
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+    src.start(now);
+
+    this.murmurSource = src;
+    this.murmurGain = gain;
+  }
+
+  public stopAbyssMurmur(): void {
+    if (!this.murmurSource || !this.ctx) {
+      this.murmurSource = null;
+      this.murmurGain = null;
+      return;
+    }
+    const now = this.ctx.currentTime;
+    const src = this.murmurSource;
+    const gain = this.murmurGain;
+    this.murmurSource = null;
+    this.murmurGain = null;
+
+    if (gain) {
+      try {
+        gain.gain.cancelScheduledValues(now);
+        gain.gain.setValueAtTime(gain.gain.value, now);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
+      } catch {
+        // Ignore
+      }
+    }
+    setTimeout(() => {
+      try {
+        src.stop();
+        src.disconnect();
+      } catch {
+        // Ignore
+      }
+    }, 320);
+  }
 }
 
 export const soundEngine = new SoundEngine();

@@ -28,35 +28,35 @@ export function createAmberArrow(
   const { map, roughnessMap } = createAmberVeinTexture(maxAnisotropy);
 
   const amberMat = new THREE.MeshPhysicalMaterial({
-    color: new THREE.Color('#ffbe3b'),
+    color: new THREE.Color('#ffcc4d'),
     map,
     roughnessMap,
-    roughness: 0.16,
+    roughness: 0.14,
     metalness: 0.08,
-    emissive: new THREE.Color('#d97706'),
-    emissiveIntensity: 0.85,
+    emissive: new THREE.Color(0xff9900),
+    emissiveIntensity: 0.95,
     clearcoat: 1.0,
-    clearcoatRoughness: 0.12,
+    clearcoatRoughness: 0.1,
     transparent: true,
-    opacity: 0.92,
+    opacity: 0.96,
     iridescence: isSoftwareGl ? 0 : 0.25,
     ior: 1.54,
   });
 
   const goldMat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color('#fcd34d'),
-    metalness: 0.92,
-    roughness: 0.22,
-    emissive: new THREE.Color('#b45309'),
-    emissiveIntensity: 0.35,
+    color: new THREE.Color('#ffe58f'),
+    metalness: 0.88,
+    roughness: 0.18,
+    emissive: new THREE.Color('#ffb703'),
+    emissiveIntensity: 0.72,
   });
 
   const coreMat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color('#fffbeb'),
-    emissive: new THREE.Color('#ffb703'),
-    emissiveIntensity: 1.7,
-    roughness: 0.1,
-    metalness: 0.2,
+    color: new THREE.Color('#ffffff'),
+    emissive: new THREE.Color('#ffd166'),
+    emissiveIntensity: 2.3,
+    roughness: 0.08,
+    metalness: 0.15,
   });
 
   // 1. Główny grot z bursztynu (ExtrudeGeometry leżący w płaszczyźnie XZ, czubek w -Z)
@@ -145,9 +145,28 @@ export function createAmberArrow(
   coreMesh.position.set(0, 0.06, -0.14);
   group.add(coreMesh);
 
-  // Światło rozświetlające czarną wodę wokół strzałki
-  const light = new THREE.PointLight(0xffa726, 2.8, 5.2, 1.8);
-  light.position.set(0, 0.45, -0.2);
+  // Złota obwódka wokół całego grota dla maksymalnej wyrazistości na ekranach OLED
+  const rimPts = [
+    new THREE.Vector3(0, 0.06, -0.98),
+    new THREE.Vector3(0.32, 0.06, -0.14),
+    new THREE.Vector3(0.10, 0.06, -0.24),
+    new THREE.Vector3(0.08, 0.06, 0.80),
+    new THREE.Vector3(0.17, 0.06, 0.94),
+    new THREE.Vector3(0, 0.06, 0.84),
+    new THREE.Vector3(-0.17, 0.06, 0.94),
+    new THREE.Vector3(-0.08, 0.06, 0.80),
+    new THREE.Vector3(-0.10, 0.06, -0.24),
+    new THREE.Vector3(-0.32, 0.06, -0.14),
+    new THREE.Vector3(0, 0.06, -0.98),
+  ];
+  const rimCurve = new THREE.CatmullRomCurve3(rimPts, true, 'centripetal', 0.15);
+  const rimEdgeGeo = new THREE.TubeGeometry(rimCurve, 72, 0.015, 6, true);
+  const rimEdgeMesh = new THREE.Mesh(rimEdgeGeo, goldMat);
+  group.add(rimEdgeMesh);
+
+  // Mocne światło punktowe podążające tuż nad strzałką
+  const light = new THREE.PointLight(0xffb732, 4.8, 7.5, 1.4);
+  light.position.set(0, 0.85, -0.15);
   group.add(light);
 
   return {
@@ -204,12 +223,12 @@ export function createAbyssOrb(variant: OrbVariant): AbyssOrbRig {
   const coreMat = new THREE.MeshStandardMaterial({
     color: palette.core,
     emissive: palette.emissive,
-    emissiveIntensity: 2.2,
-    roughness: 0.2,
+    emissiveIntensity: 2.8,
+    roughness: 0.18,
     metalness: 0.1,
   });
   const coreMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(0.16, 24, 24),
+    new THREE.SphereGeometry(0.18, 24, 24),
     coreMat,
   );
   group.add(coreMesh);
@@ -217,16 +236,16 @@ export function createAbyssOrb(variant: OrbVariant): AbyssOrbRig {
   const shellMat = new THREE.MeshPhysicalMaterial({
     color: palette.shell,
     emissive: palette.emissive,
-    emissiveIntensity: 0.55,
-    roughness: 0.12,
+    emissiveIntensity: 0.95,
+    roughness: 0.1,
     metalness: 0.05,
     clearcoat: 1.0,
-    clearcoatRoughness: 0.08,
+    clearcoatRoughness: 0.06,
     transparent: true,
-    opacity: 0.72,
+    opacity: 0.82,
   });
   const shellMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(0.28, 28, 28),
+    new THREE.SphereGeometry(0.30, 28, 28),
     shellMat,
   );
   group.add(shellMesh);
@@ -234,12 +253,12 @@ export function createAbyssOrb(variant: OrbVariant): AbyssOrbRig {
   const haloMat = new THREE.MeshBasicMaterial({
     color: palette.emissive,
     transparent: true,
-    opacity: 0.28,
+    opacity: 0.42,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
   });
   const haloRing = new THREE.Mesh(
-    new THREE.RingGeometry(0.26, 0.42, 32),
+    new THREE.RingGeometry(0.28, 0.48, 32),
     haloMat,
   );
   haloRing.rotation.x = -Math.PI / 2;
@@ -247,7 +266,7 @@ export function createAbyssOrb(variant: OrbVariant): AbyssOrbRig {
 
   // Niewidoczny powiększony hitbox do wygodnego klikania palcem
   const hitMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(0.56, 12, 12),
+    new THREE.SphereGeometry(0.58, 12, 12),
     new THREE.MeshBasicMaterial({
       transparent: true,
       opacity: 0,
@@ -257,8 +276,8 @@ export function createAbyssOrb(variant: OrbVariant): AbyssOrbRig {
   );
   group.add(hitMesh);
 
-  const light = new THREE.PointLight(palette.light, 1.9, 3.6, 2.0);
-  light.position.set(0, 0.25, 0);
+  const light = new THREE.PointLight(palette.light, 3.0, 5.0, 1.6);
+  light.position.set(0, 0.45, 0);
   group.add(light);
 
   return {

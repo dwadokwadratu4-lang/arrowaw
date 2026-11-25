@@ -59,6 +59,8 @@ interface ActiveDragonEye {
 }
 
 const MAX_RIPPLES = 12;
+const SURFACE_Y = 0.4;
+const SLEEP_TIMEOUT_MS = 15000;
 const _raycaster = new THREE.Raycaster();
 const _pointer = new THREE.Vector2();
 
@@ -177,10 +179,10 @@ export class BlackWaterScene {
     this.renderer.domElement.style.touchAction = 'none';
     this.container.appendChild(this.renderer.domElement);
 
-    // 3. Scena i mgła głębinowa
+    // 3. Scena i liniowa mgła głębinowa (0% mgły dla y >= -0.18, pełna czerń poniżej y = -3.5)
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x000000);
-    this.scene.fog = new THREE.FogExp2(0x000000, 0.42);
+    this.scene.fog = new THREE.Fog(0x000000, 14.18, 17.5);
 
     // 4. Kamera z góry (-Z = góra ekranu, +X = prawo, +Y = do obserwatora)
     const width = Math.max(1, container.clientWidth || window.innerWidth);
@@ -233,14 +235,14 @@ export class BlackWaterScene {
   }
 
   private setupLighting(): void {
-    const hemi = new THREE.HemisphereLight(0x3b4d6b, 0x050302, 0.75);
+    const hemi = new THREE.HemisphereLight(0x6b7fa3, 0x1a1208, 1.15);
     this.scene.add(hemi);
 
-    const key = new THREE.DirectionalLight(0xffdfb0, 1.35);
+    const key = new THREE.DirectionalLight(0xffe6ba, 1.85);
     key.position.set(2.5, 9, -3.5);
     this.scene.add(key);
 
-    const rim = new THREE.DirectionalLight(0x8bb8ff, 0.65);
+    const rim = new THREE.DirectionalLight(0x9bc4ff, 0.9);
     rim.position.set(-4, 6, 4);
     this.scene.add(rim);
   }
@@ -250,13 +252,13 @@ export class BlackWaterScene {
     geo.rotateX(-Math.PI / 2);
 
     const mat = new THREE.MeshPhysicalMaterial({
-      color: new THREE.Color(0x030305),
+      color: new THREE.Color(0x030306),
       roughness: 0.08,
-      metalness: 0.16,
+      metalness: 0.18,
       clearcoat: 1.0,
       clearcoatRoughness: 0.04,
       transparent: true,
-      opacity: 0.48,
+      opacity: 0.84,
       depthWrite: false,
     });
 
@@ -312,8 +314,8 @@ export class BlackWaterScene {
     };
 
     this.waterMesh = new THREE.Mesh(geo, mat);
-    this.waterMesh.position.y = 0.14;
-    this.waterMesh.renderOrder = 10;
+    this.waterMesh.position.y = 0.0;
+    this.waterMesh.renderOrder = 5;
     this.scene.add(this.waterMesh);
   }
 
@@ -351,7 +353,7 @@ export class BlackWaterScene {
     });
 
     const glassMesh = new THREE.Mesh(glassGeo, glassMat);
-    glassMesh.position.y = 0.45;
+    glassMesh.position.y = 0.9;
     glassMesh.renderOrder = 20;
     this.scene.add(glassMesh);
   }
@@ -390,10 +392,23 @@ export class BlackWaterScene {
     this.phase = 'seeking';
     this.scaredUntil = 0;
     this.waitingMotionAfterScare = false;
-    this.arrowY = -1.6;
-    this.nextOrbSpawnTime = this.elapsed + 2.4;
+
+    // Natychmiastowa widoczność strzałki i pierwszej kuli na powierzchni (+0.4 ponad wodą y=0)
+    const snap = this.getSnapshot();
+    this.arrowAngleRad = -THREE.MathUtils.degToRad(snap.relativeAngleDeg);
+    this.arrowX = 0;
+    this.arrowZ = 0;
+    this.arrowY = SURFACE_Y;
+    this.arrowRig.group.position.set(this.arrowX, this.arrowY, this.arrowZ);
+    this.arrowRig.group.rotation.set(0, this.arrowAngleRad, 0);
+    this.arrowRig.light.intensity = 4.8;
+
+    this.spawnSurfaceOrbImmediately();
+    this.nextOrbSpawnTime = this.elapsed + 5.0;
+
     this.onMotion();
-    this.addRipple(0, 0, 1.35);
+    this.lastHandledShakeTime = performance.now();
+    this.addRipple(0, 0, 1.45);
     soundEngine.playSplash(0.8);
   }
 
@@ -403,12 +418,18 @@ export class BlackWaterScene {
     this.waitingMotionAfterScare = false;
     this.onMotion();
     this.lastHandledShakeTime = nowPerf;
-    if (this.phase === 'sleeping' || this.phase === 'scared') {
+    const wasSleeping = this.phase === 'sleeping' || this.phase === 'scared';
+    if (wasSleeping) {
       this.phase = 'seeking';
+      soundEngine.stopAbyssMurmur();
+      this.arrowY = Math.max(this.arrowY, -0.4);
+      if (this.orbs.length === 0) {
+        this.spawnSurfaceOrbImmediately();
+      }
     }
-    this.addRipple(this.arrowX, this.arrowZ, 1.45);
-    soundEngine.playSplash(0.85);
-    safeVibrate(40);
+    this.addRipple(this.arrowX, this.arrowZ, 1.55);
+    soundEngine.playSplash(0.9);
+    safeVibrate(45);
   }
 
   private handleDoubleClick(e: MouseEvent): void {
@@ -553,6 +574,34 @@ export class BlackWaterScene {
     }
   }
 
+  private spawnSurfaceOrbImmediately(): void {
+    const variants: OrbVariant[] = ['emerald', 'amber', 'ruby'];
+    const variant = variants[Math.floor(Math.random() * variants.length)];
+    const rig = createAbyssOrb(variant);
+
+    const safeX = Math.max(0.55, this.halfW * 0.45);
+    const x = (Math.random() > 0.5 ? 1 : -1) * safeX;
+    const z = -Math.min(1.1, this.halfH * 0.25);
+    const y = SURFACE_Y;
+
+    rig.group.position.set(x, y, z);
+    this.scene.add(rig.group);
+    this.addRipple(x, z, 0.85);
+
+    this.orbs.push({
+      id: this.nextOrbId++,
+      rig,
+      x,
+      z,
+      y,
+      state: 'floating',
+      tappedGlass: true,
+      spawnTime: this.elapsed,
+      floatUntil: this.elapsed + 9.0,
+      bobPhase: Math.random() * Math.PI * 2,
+    });
+  }
+
   private spawnRandomOrb(): void {
     const variants: OrbVariant[] = ['emerald', 'amber', 'ruby'];
     const variant = variants[Math.floor(Math.random() * variants.length)];
@@ -564,7 +613,7 @@ export class BlackWaterScene {
 
     const x = THREE.MathUtils.randFloat(-safeX, safeX);
     const z = THREE.MathUtils.randFloat(-safeZTop, safeZBot);
-    const y = -3.4;
+    const y = -2.2;
 
     rig.group.position.set(x, y, z);
     this.scene.add(rig.group);
@@ -578,7 +627,7 @@ export class BlackWaterScene {
       state: 'rising',
       tappedGlass: false,
       spawnTime: this.elapsed,
-      floatUntil: this.elapsed + THREE.MathUtils.randFloat(6.0, 9.0),
+      floatUntil: this.elapsed + THREE.MathUtils.randFloat(7.5, 11.0),
       bobPhase: Math.random() * Math.PI * 2,
     });
   }
@@ -645,6 +694,7 @@ export class BlackWaterScene {
     if (this.waitingMotionAfterScare) {
       if (snapshot.lastMotionTime > this.scaredUntil) {
         this.waitingMotionAfterScare = false;
+        this.phase = 'seeking';
         this.addRipple(this.arrowX, this.arrowZ, 1.3);
         soundEngine.playSplash(0.8);
       } else {
@@ -660,10 +710,14 @@ export class BlackWaterScene {
     const wasSleeping = this.phase === 'sleeping';
     if (wasSleeping && snapshot.lastShakeTime > this.lastHandledShakeTime) {
       this.lastHandledShakeTime = snapshot.lastShakeTime;
-      this.addRipple(this.arrowX, this.arrowZ, 1.45);
-      soundEngine.playSplash(0.9);
+      soundEngine.stopAbyssMurmur();
+      this.addRipple(this.arrowX, this.arrowZ, 1.55);
+      soundEngine.playSplash(0.95);
       safeVibrate(45);
       this.phase = 'seeking';
+      if (this.orbs.length === 0) {
+        this.spawnSurfaceOrbImmediately();
+      }
     } else {
       this.lastHandledShakeTime = Math.max(
         this.lastHandledShakeTime,
@@ -671,21 +725,26 @@ export class BlackWaterScene {
       );
     }
 
-    // Kontrola bezruchu (6 sekund -> tonie w czarnej wodzie)
+    // Kontrola bezruchu (pełne 15 sekund -> zanurza się pod czarną taflę wody)
     const idleMs = nowPerf - snapshot.lastMotionTime;
-    if (idleMs > 6000) {
-      this.phase = 'sleeping';
-      this.arrowY = THREE.MathUtils.damp(this.arrowY, -3.9, 1.35, dt);
+    if (idleMs >= SLEEP_TIMEOUT_MS) {
+      if (this.phase !== 'sleeping') {
+        this.phase = 'sleeping';
+        soundEngine.startAbyssMurmur();
+      }
+      this.arrowY = THREE.MathUtils.damp(this.arrowY, -3.6, 1.15, dt);
       this.arrowGlow = THREE.MathUtils.damp(this.arrowGlow, 0, 3, dt);
       this.arrowRig.group.position.set(this.arrowX, this.arrowY, this.arrowZ);
       this.arrowRig.light.intensity = THREE.MathUtils.damp(
         this.arrowRig.light.intensity,
         0,
-        3,
+        2.5,
         dt,
       );
       return;
     }
+
+    soundEngine.stopAbyssMurmur();
 
     // Kontrola wypoziomowania (beta lub gamma > 25°)
     if (!snapshot.isFlat) {
@@ -693,7 +752,7 @@ export class BlackWaterScene {
       const botZ = Math.max(0.3, this.halfH - 0.95 * this.arrowScale - 0.25);
       this.arrowX = THREE.MathUtils.damp(this.arrowX, 0, 5, dt);
       this.arrowZ = THREE.MathUtils.damp(this.arrowZ, botZ, 4.5, dt);
-      this.arrowY = THREE.MathUtils.damp(this.arrowY, -0.15, 5, dt);
+      this.arrowY = THREE.MathUtils.damp(this.arrowY, SURFACE_Y - 0.12, 5, dt);
       this.arrowGlow = THREE.MathUtils.damp(this.arrowGlow, 0, 6, dt);
 
       // Zsuwa się bezwładnie i opada nosem lekko w dół
@@ -705,7 +764,7 @@ export class BlackWaterScene {
       this.arrowAngleRad += diff * Math.min(1, dt * 4);
       this.arrowRig.group.rotation.set(-0.18, this.arrowAngleRad, 0);
       this.arrowRig.group.position.set(this.arrowX, this.arrowY, this.arrowZ);
-      this.arrowRig.light.intensity = 1.4;
+      this.arrowRig.light.intensity = 2.6;
       return;
     }
 
@@ -748,7 +807,7 @@ export class BlackWaterScene {
 
     let targetX = anchorX;
     let targetZ = anchorZ;
-    let targetY = -0.02 + Math.sin(this.elapsed * 2.5) * 0.015;
+    let targetY = SURFACE_Y + Math.sin(this.elapsed * 2.5) * 0.02;
     let targetGlow = 0;
 
     if (this.phase === 'seeking') {
@@ -803,27 +862,27 @@ export class BlackWaterScene {
       // Czarodziejsko rozjaśniona strzałka wskazująca prosto ku górze!
       targetX = 0;
       targetZ = -Math.min(0.42, this.halfH * 0.14);
-      targetY = 0.02 + Math.sin(this.elapsed * 2.2) * 0.015;
+      targetY = SURFACE_Y + 0.05 + Math.sin(this.elapsed * 2.2) * 0.02;
       targetGlow = 1.0;
 
       this.arrowX = THREE.MathUtils.damp(this.arrowX, targetX, 5.5, dt);
       this.arrowZ = THREE.MathUtils.damp(this.arrowZ, targetZ, 5.5, dt);
     }
 
-    this.arrowY = THREE.MathUtils.damp(this.arrowY, targetY, 6, dt);
+    this.arrowY = THREE.MathUtils.damp(this.arrowY, targetY, 7, dt);
     this.arrowGlow = THREE.MathUtils.damp(this.arrowGlow, targetGlow, 4.5, dt);
 
     this.arrowRig.group.position.set(this.arrowX, this.arrowY, this.arrowZ);
     this.arrowRig.group.rotation.set(0, this.arrowAngleRad, 0);
 
-    // Rozżarzanie bursztynu i światła przy dobrym kierunku
+    // Rozżarzanie bursztynu i mocne światło punktowe tuż nad strzałką
     const pulse = 1 + Math.sin(this.elapsed * 4.0) * 0.12 * this.arrowGlow;
     this.arrowRig.amberMat.emissiveIntensity =
-      (0.85 + this.arrowGlow * 1.45) * pulse;
+      (0.95 + this.arrowGlow * 1.55) * pulse;
     this.arrowRig.coreMat.emissiveIntensity =
-      (1.7 + this.arrowGlow * 2.2) * pulse;
-    this.arrowRig.goldMat.emissiveIntensity = 0.35 + this.arrowGlow * 0.75;
-    this.arrowRig.light.intensity = (2.6 + this.arrowGlow * 3.4) * pulse;
+      (2.3 + this.arrowGlow * 2.4) * pulse;
+    this.arrowRig.goldMat.emissiveIntensity = 0.72 + this.arrowGlow * 0.95;
+    this.arrowRig.light.intensity = (4.8 + this.arrowGlow * 3.8) * pulse;
   }
 
   private updateOrbsAndDragonEye(dt: number, snapshot: SensorSnapshot): void {
@@ -852,31 +911,31 @@ export class BlackWaterScene {
       }
 
       if (orb.state === 'rising') {
-        orb.y = THREE.MathUtils.damp(orb.y, -0.08, 1.8, dt);
-        if (orb.y >= -0.15 && !orb.tappedGlass) {
+        orb.y = THREE.MathUtils.damp(orb.y, SURFACE_Y, 2.6, dt);
+        if (orb.y >= SURFACE_Y - 0.14 && !orb.tappedGlass) {
           orb.tappedGlass = true;
           orb.state = 'floating';
-          this.addRipple(orb.x, orb.z, 0.65);
+          this.addRipple(orb.x, orb.z, 0.75);
           soundEngine.playOrbTap();
           safeVibrate(20);
         }
       } else if (orb.state === 'floating') {
-        orb.y = -0.08 + Math.sin(this.elapsed * 2.2 + orb.bobPhase) * 0.025;
+        orb.y = SURFACE_Y + Math.sin(this.elapsed * 2.2 + orb.bobPhase) * 0.03;
         if (this.elapsed >= orb.floatUntil) {
           orb.state = 'sinking';
         }
       } else {
-        const sinkSpeed = isScared ? 8.5 : 1.4;
-        orb.y = THREE.MathUtils.damp(orb.y, -4.0, sinkSpeed, dt);
+        const sinkSpeed = isScared ? 8.5 : 1.15;
+        orb.y = THREE.MathUtils.damp(orb.y, -3.7, sinkSpeed, dt);
       }
 
       orb.rig.group.position.set(orb.x, orb.y, orb.z);
-      const pulse = 0.85 + Math.sin(this.elapsed * 3.5 + orb.bobPhase) * 0.15;
-      orb.rig.coreMat.emissiveIntensity = 2.1 * pulse;
+      const pulse = 0.88 + Math.sin(this.elapsed * 3.5 + orb.bobPhase) * 0.14;
+      orb.rig.coreMat.emissiveIntensity = 2.8 * pulse;
       orb.rig.light.intensity =
-        THREE.MathUtils.clamp((orb.y + 3.2) / 3.1, 0, 1) * 1.9 * pulse;
+        THREE.MathUtils.clamp((orb.y + 2.5) / 2.9, 0, 1) * 3.0 * pulse;
 
-      if (orb.y < -3.65 && orb.state === 'sinking') {
+      if (orb.y < -3.35 && orb.state === 'sinking') {
         this.scene.remove(orb.rig.group);
       } else {
         remainingOrbs.push(orb);
@@ -894,28 +953,28 @@ export class BlackWaterScene {
 
       if (eye.state === 'opening') {
         eye.openAmount = Math.min(1, eye.openAmount + dt / 0.42);
-        eye.y = THREE.MathUtils.damp(eye.y, -0.02, 7, dt);
+        eye.y = THREE.MathUtils.damp(eye.y, SURFACE_Y + 0.04, 7, dt);
         if (eye.openAmount >= 1) {
           eye.state = 'open';
         }
       } else if (eye.state === 'open') {
         eye.openAmount = 1;
-        eye.y = -0.02 + Math.sin(this.elapsed * 2.4) * 0.015;
+        eye.y = SURFACE_Y + 0.04 + Math.sin(this.elapsed * 2.4) * 0.02;
         if (this.elapsed >= eye.openUntil) {
           eye.state = 'closing';
         }
       } else if (eye.state === 'closing') {
         eye.openAmount = Math.max(0, eye.openAmount - dt / 0.36);
-        eye.y = THREE.MathUtils.damp(eye.y, -3.9, 2.2, dt);
-        if (eye.openAmount <= 0 && eye.y < -3.4) {
+        eye.y = THREE.MathUtils.damp(eye.y, -3.7, 2.2, dt);
+        if (eye.openAmount <= 0 && eye.y < -3.1) {
           this.scene.remove(eye.rig.group);
           this.dragonEye = null;
           return;
         }
       } else if (eye.state === 'fleeing') {
         eye.openAmount = Math.max(0, eye.openAmount - dt / 0.18);
-        eye.y = THREE.MathUtils.damp(eye.y, -4.4, 9, dt);
-        if (eye.y < -3.8) {
+        eye.y = THREE.MathUtils.damp(eye.y, -4.0, 9, dt);
+        if (eye.y < -3.4) {
           this.scene.remove(eye.rig.group);
           this.dragonEye = null;
           return;
@@ -1012,6 +1071,7 @@ export class BlackWaterScene {
 
   public dispose(): void {
     this.disposed = true;
+    soundEngine.stopAbyssMurmur();
     cancelAnimationFrame(this.frameId);
     clearTimeout(this.frameId);
 
