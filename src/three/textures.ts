@@ -275,3 +275,128 @@ export function createReptileScaleTexture(maxAnisotropy = 4): {
 
   return { map, bumpMap };
 }
+
+/**
+ * Tekstura zamkniętego Smoczego Oka w głębokim krwistoczerwonym / rubinowym odcieniu
+ * z gadzimi łuskami oraz ciemnym rowkiem zamkniętej powieki pośrodku.
+ */
+export function createRedDragonLidTexture(
+  variantTint: 'crimson' | 'ruby' | 'garnet',
+  maxAnisotropy = 4,
+): {
+  map: THREE.CanvasTexture;
+  bumpMap: THREE.CanvasTexture;
+  emissiveMap: THREE.CanvasTexture;
+} {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+
+  const bumpCanvas = document.createElement('canvas');
+  bumpCanvas.width = size;
+  bumpCanvas.height = size;
+  const bCtx = bumpCanvas.getContext('2d')!;
+
+  const emissiveCanvas = document.createElement('canvas');
+  emissiveCanvas.width = size;
+  emissiveCanvas.height = size;
+  const eCtx = emissiveCanvas.getContext('2d')!;
+
+  const palette =
+    variantTint === 'ruby'
+      ? { hi: '#8c101d', mid: '#4b060e', edge: '#140103', rim: 'rgba(225, 29, 72, 0.22)' }
+      : variantTint === 'garnet'
+        ? { hi: '#740d18', mid: '#3b040a', edge: '#0f0102', rim: 'rgba(190, 18, 60, 0.18)' }
+        : { hi: '#99111f', mid: '#520710', edge: '#160103', rim: 'rgba(244, 63, 94, 0.20)' };
+
+  ctx.fillStyle = '#140204';
+  ctx.fillRect(0, 0, size, size);
+  bCtx.fillStyle = '#242424';
+  bCtx.fillRect(0, 0, size, size);
+  eCtx.fillStyle = '#080102';
+  eCtx.fillRect(0, 0, size, size);
+
+  const rows = 13;
+  const cols = 13;
+  const cellW = size / cols;
+  const cellH = size / rows;
+
+  for (let r = -1; r <= rows; r++) {
+    for (let c = -1; c <= cols; c++) {
+      const x = c * cellW + (r % 2 === 0 ? 0 : cellW * 0.5);
+      const y = r * cellH;
+      const rad = cellW * 0.56;
+
+      const g = ctx.createRadialGradient(x, y - rad * 0.22, 1, x, y, rad);
+      g.addColorStop(0, palette.hi);
+      g.addColorStop(0.62, palette.mid);
+      g.addColorStop(1, palette.edge);
+      ctx.beginPath();
+      ctx.arc(x, y, rad, 0, Math.PI * 2);
+      ctx.fillStyle = g;
+      ctx.fill();
+      ctx.strokeStyle = palette.rim;
+      ctx.lineWidth = 0.9;
+      ctx.stroke();
+
+      const bg = bCtx.createRadialGradient(x, y, 1, x, y, rad);
+      bg.addColorStop(0, '#f0f0f0');
+      bg.addColorStop(0.75, '#727272');
+      bg.addColorStop(1, '#121212');
+      bCtx.beginPath();
+      bCtx.arc(x, y, rad, 0, Math.PI * 2);
+      bCtx.fillStyle = bg;
+      bCtx.fill();
+    }
+  }
+
+  // Ciemny rowek zamkniętej powieki biegnący po równiku (y = size * 0.5)
+  const seamY = size * 0.5;
+  const seamBand = ctx.createLinearGradient(0, seamY - 18, 0, seamY + 18);
+  seamBand.addColorStop(0, 'rgba(20, 2, 4, 0)');
+  seamBand.addColorStop(0.38, 'rgba(14, 1, 3, 0.82)');
+  seamBand.addColorStop(0.5, 'rgba(3, 0, 1, 0.98)');
+  seamBand.addColorStop(0.62, 'rgba(14, 1, 3, 0.82)');
+  seamBand.addColorStop(1, 'rgba(20, 2, 4, 0)');
+  ctx.fillStyle = seamBand;
+  ctx.fillRect(0, seamY - 18, size, 36);
+
+  // Wyraźne wgłębienie rowka w bumpMap
+  const bumpSeam = bCtx.createLinearGradient(0, seamY - 14, 0, seamY + 14);
+  bumpSeam.addColorStop(0, 'rgba(128, 128, 128, 0)');
+  bumpSeam.addColorStop(0.5, 'rgba(0, 0, 0, 0.98)');
+  bumpSeam.addColorStop(1, 'rgba(128, 128, 128, 0)');
+  bCtx.fillStyle = bumpSeam;
+  bCtx.fillRect(0, seamY - 14, size, 28);
+
+  // Subtelny rubinowy żar sączący się spod zaciśniętej powieki oraz z łusek
+  const glowGrad = eCtx.createLinearGradient(0, seamY - 16, 0, seamY + 16);
+  glowGrad.addColorStop(0, 'rgba(70, 5, 16, 0.08)');
+  glowGrad.addColorStop(0.42, 'rgba(190, 18, 52, 0.45)');
+  glowGrad.addColorStop(0.5, 'rgba(244, 63, 94, 0.72)');
+  glowGrad.addColorStop(0.58, 'rgba(190, 18, 52, 0.45)');
+  glowGrad.addColorStop(1, 'rgba(70, 5, 16, 0.08)');
+  eCtx.fillStyle = glowGrad;
+  eCtx.fillRect(0, seamY - 16, size, 32);
+
+  const map = new THREE.CanvasTexture(canvas);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.ClampToEdgeWrapping;
+  map.anisotropy = maxAnisotropy;
+
+  const bumpMap = new THREE.CanvasTexture(bumpCanvas);
+  bumpMap.wrapS = THREE.RepeatWrapping;
+  bumpMap.wrapT = THREE.ClampToEdgeWrapping;
+
+  const emissiveMap = new THREE.CanvasTexture(emissiveCanvas);
+  emissiveMap.colorSpace = THREE.SRGBColorSpace;
+  emissiveMap.wrapS = THREE.RepeatWrapping;
+  emissiveMap.wrapT = THREE.ClampToEdgeWrapping;
+  emissiveMap.anisotropy = maxAnisotropy;
+
+  return { map, bumpMap, emissiveMap };
+}
+

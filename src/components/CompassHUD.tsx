@@ -10,7 +10,7 @@ import {
   VolumeX,
   Waves,
 } from 'lucide-react';
-import { GpsStatus } from '../hooks/useDeviceSensors';
+import { CompassMode, GpsStatus } from '../hooks/useDeviceSensors';
 import { SceneHudState } from '../three/BlackWaterScene';
 import { OfflineIndicator, PWAInstallButton } from './PWAInstallButton';
 
@@ -19,6 +19,9 @@ interface CompassHUDProps {
   hud: SceneHudState;
   gpsStatus: GpsStatus;
   hasRealCompass: boolean;
+  lowCompassAccuracy: boolean;
+  compassMode: CompassMode;
+  onToggleCompassMode: () => void;
   manualHeadingDeg: number;
   onManualHeadingChange: (deg: number) => void;
   manualTilted: boolean;
@@ -34,6 +37,9 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
   hud,
   gpsStatus,
   hasRealCompass,
+  lowCompassAccuracy,
+  compassMode,
+  onToggleCompassMode,
   manualHeadingDeg,
   onManualHeadingChange,
   manualTilted,
@@ -46,12 +52,22 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
   // Na PC (brak prawdziwego kompasu) panel testowy jest domyślnie otwarty; na telefonie zwinięty
   const [dockOpen, setDockOpen] = useState<boolean>(!hasRealCompass);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [mobileStartHint, setMobileStartHint] = useState<boolean>(false);
 
   useEffect(() => {
     if (hasRealCompass) {
       setDockOpen(false);
     }
   }, [hasRealCompass]);
+
+  useEffect(() => {
+    if (!activated || !hasRealCompass) return;
+    setMobileStartHint(true);
+    const timer = window.setTimeout(() => {
+      setMobileStartHint(false);
+    }, 12000);
+    return () => window.clearTimeout(timer);
+  }, [activated, hasRealCompass]);
 
   useEffect(() => {
     const handleFsChange = () => {
@@ -101,26 +117,112 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
   }, []);
 
   const isGlowing = activated && hud.isLocked;
+  const emphasizeCalibration =
+    compassMode === 'auto' &&
+    hasRealCompass &&
+    (lowCompassAccuracy || mobileStartHint);
 
   return (
     <>
-      {/* 1. Górny napis przy przedniej kamerze / notchu */}
-      <header className="pointer-events-none fixed inset-x-0 top-0 z-20 flex flex-col items-center px-14 pt-[max(env(safe-area-inset-top),12px)] text-center">
-        <h1
-          className={`font-display text-[13px] sm:text-sm font-semibold tracking-[0.09em] transition-all duration-700 text-balance ${
-            isGlowing ? 'text-[#ffe6a3]' : 'text-amber-500/45'
-          }`}
-          style={{
-            textShadow: isGlowing
-              ? '0 0 12px rgba(255, 200, 75, 0.92), 0 0 28px rgba(245, 158, 11, 0.72)'
-              : '0 0 8px rgba(217, 119, 6, 0.2)',
-          }}
-        >
-          Gdzie jest ZAMEK PIASTOWSKI w RACIBORZU
+      {/* 1. Górne przyciemnienie tła + złoty trójkąt celowniczy + dwuwierszowy nagłówek o wysokim kontraście */}
+      <header
+        className="pointer-events-none fixed inset-x-0 top-0 z-20 flex flex-col items-center px-14 pt-[max(env(safe-area-inset-top),4px)] pb-5 text-center"
+        style={{
+          background:
+            'linear-gradient(180deg, rgba(0, 0, 0, 0.92) 0%, rgba(0, 0, 0, 0.62) 62%, rgba(0, 0, 0, 0) 100%)',
+        }}
+      >
+        {/* Złoty trójkąt celowniczy skierowany grotem w dół na osi telefonu */}
+        <div className="mb-1 flex justify-center">
+          <svg
+            width="20"
+            height="13"
+            viewBox="0 0 20 13"
+            aria-hidden="true"
+            className={`transition-transform duration-500 ${
+              isGlowing ? 'scale-110' : 'scale-100'
+            }`}
+            style={{
+              filter: isGlowing
+                ? 'drop-shadow(0 0 9px rgba(255, 238, 140, 0.98)) drop-shadow(0 0 20px rgba(245, 158, 11, 0.9))'
+                : 'drop-shadow(0 2px 6px rgba(0, 0, 0, 0.95)) drop-shadow(0 0 5px rgba(245, 158, 11, 0.45))',
+            }}
+          >
+            <defs>
+              <linearGradient id="target-triangle-gold" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={isGlowing ? '#ffffff' : '#fef08a'} />
+                <stop offset="55%" stopColor={isGlowing ? '#fde047' : '#f59e0b'} />
+                <stop offset="100%" stopColor={isGlowing ? '#f59e0b' : '#b45309'} />
+              </linearGradient>
+            </defs>
+            <polygon
+              points="10,12 1.5,1 18.5,1"
+              fill="url(#target-triangle-gold)"
+              stroke={isGlowing ? '#fffbeb' : '#fde047'}
+              strokeWidth="0.9"
+            />
+          </svg>
+        </div>
+
+        <h1 className="font-display flex flex-col items-center leading-tight">
+          {/* Wiersz 1: mniejszy, subtelny */}
+          <span className="relative inline-block text-[10px] sm:text-[11px] font-medium tracking-[0.26em] uppercase">
+            <span
+              aria-hidden="true"
+              className="select-none text-transparent"
+              style={{
+                textShadow: '0 2px 10px rgba(0, 0, 0, 0.95)',
+              }}
+            >
+              GDZIE JEST
+            </span>
+            <span
+              className="absolute inset-0 bg-clip-text text-transparent"
+              style={{
+                backgroundImage:
+                  'linear-gradient(180deg, #ffffff 0%, #fde047 60%, #f59e0b 100%)',
+                filter: isGlowing
+                  ? 'drop-shadow(0 0 8px rgba(253, 224, 71, 0.65))'
+                  : 'drop-shadow(0 2px 10px rgba(0, 0, 0, 0.95))',
+              }}
+            >
+              GDZIE JEST
+            </span>
+          </span>
+
+          {/* Wiersz 2: większy, wyrazisty */}
+          <span className="relative mt-0.5 inline-block text-[13px] sm:text-[15px] font-bold tracking-[0.09em] uppercase text-balance">
+            <span
+              aria-hidden="true"
+              className="select-none text-transparent"
+              style={{
+                textShadow: '0 2px 10px rgba(0, 0, 0, 0.95)',
+              }}
+            >
+              ZAMEK PIASTOWSKI W RACIBORZU
+            </span>
+            <span
+              className="absolute inset-0 bg-clip-text text-transparent"
+              style={{
+                backgroundImage:
+                  'linear-gradient(180deg, #ffffff 0%, #fde047 60%, #f59e0b 100%)',
+                filter: isGlowing
+                  ? 'drop-shadow(0 0 12px rgba(253, 224, 71, 0.8))'
+                  : 'drop-shadow(0 2px 10px rgba(0, 0, 0, 0.95))',
+              }}
+            >
+              ZAMEK PIASTOWSKI W RACIBORZU
+            </span>
+          </span>
         </h1>
 
         {isGlowing && (
-          <p className="font-mono-tabular mt-1 text-[11px] tracking-wider text-amber-200/95 transition-opacity duration-500">
+          <p
+            className="font-mono-tabular mt-1 text-[11px] font-medium tracking-wider text-amber-100 transition-opacity duration-500"
+            style={{
+              textShadow: '0 2px 10px rgba(0, 0, 0, 0.95)',
+            }}
+          >
             {hud.distanceKm.toFixed(1)} km · kierunek wskazany
           </p>
         )}
@@ -190,6 +292,15 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
       {/* 6. Dyskretny półprzezroczysty panel testowy PC / sterowania na dole ekranu */}
       {activated && (
         <div className="fixed bottom-[max(env(safe-area-inset-bottom),10px)] left-1/2 z-30 w-[min(560px,94vw)] -translate-x-1/2 flex flex-col items-center">
+          {!dockOpen && emphasizeCalibration && (
+            <p
+              className="pointer-events-none mb-1.5 text-center text-[11px] font-medium tracking-wide text-amber-200/95"
+              style={{ textShadow: '0 2px 8px rgba(0, 0, 0, 0.95)' }}
+            >
+              Kalibracja kompasu: wykonaj telefonem ruch ósemki (∞) w powietrzu
+            </p>
+          )}
+
           <button
             type="button"
             onClick={() => setDockOpen((prev) => !prev)}
@@ -227,8 +338,12 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
                   <span aria-hidden="true">·</span>
                   <span>Kurs {Math.round(hud.compassHeadingDeg)}°</span>
                 </div>
-                <span className="text-[10px] text-amber-500/55">
-                  {hasRealCompass ? 'Czujniki aktywne' : 'Tryb symulacji PC'}
+                <span className="text-[10px] text-amber-500/60">
+                  {compassMode === 'manual'
+                    ? 'Tryb ręczny · przeciągnij palcem w lewo/prawo'
+                    : hasRealCompass
+                      ? 'Czujniki wygładzone'
+                      : 'Tryb symulacji PC'}
                 </span>
               </div>
 
@@ -318,12 +433,37 @@ export const CompassHUD: React.FC<CompassHUDProps> = ({
                   )}
                 </button>
 
+                <button
+                  type="button"
+                  onClick={onToggleCompassMode}
+                  className={`inline-flex min-h-[38px] items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap ${
+                    compassMode === 'manual'
+                      ? 'border-amber-400/75 bg-amber-500/20 text-amber-100'
+                      : 'border-amber-500/25 bg-zinc-900/80 text-amber-200/85 hover:bg-zinc-800'
+                  }`}
+                >
+                  <Compass className="h-3.5 w-3.5 text-amber-400" />
+                  <span>Kompas: {compassMode === 'auto' ? 'Auto' : 'Ręczny'}</span>
+                </button>
+
                 <PWAInstallButton />
 
                 <span className="ml-auto text-[11px] font-medium tracking-wide text-amber-300/80 whitespace-nowrap">
                   Koncepcja i realizacja: Artur Wierzbicki
                 </span>
               </div>
+
+              {compassMode === 'auto' && (
+                <div
+                  className={`mt-2 border-t border-amber-500/15 pt-1.5 text-[11px] tracking-wide transition-colors ${
+                    emphasizeCalibration
+                      ? 'font-medium text-amber-200'
+                      : 'text-amber-400/65'
+                  }`}
+                >
+                  Kalibracja kompasu: wykonaj telefonem ruch ósemki (∞) w powietrzu
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -18,8 +18,12 @@ export default function App() {
     activated,
     gpsStatus,
     hasRealCompass,
+    lowCompassAccuracy,
+    compassMode,
+    toggleCompassMode,
     manualHeadingDeg,
     setManualHeadingDeg,
+    adjustManualHeading,
     manualTilted,
     setManualTilted,
     snapshotRef,
@@ -57,6 +61,7 @@ export default function App() {
       () => snapshotRef.current,
       registerMotion,
       (nextHud) => setHud(nextHud),
+      adjustManualHeading,
     );
     sceneRef.current = scene;
 
@@ -64,7 +69,7 @@ export default function App() {
       scene.dispose();
       sceneRef.current = null;
     };
-  }, [registerMotion, snapshotRef]);
+  }, [adjustManualHeading, registerMotion, snapshotRef]);
 
   const handleActivate = useCallback(async () => {
     await soundEngine.unlock();
@@ -100,6 +105,9 @@ export default function App() {
         hud={hud}
         gpsStatus={gpsStatus}
         hasRealCompass={hasRealCompass}
+        lowCompassAccuracy={lowCompassAccuracy}
+        compassMode={compassMode}
+        onToggleCompassMode={toggleCompassMode}
         manualHeadingDeg={manualHeadingDeg}
         onManualHeadingChange={setManualHeadingDeg}
         manualTilted={manualTilted}

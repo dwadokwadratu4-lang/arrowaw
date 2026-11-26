@@ -2,10 +2,11 @@ import * as THREE from 'three';
 import {
   createAmberVeinTexture,
   createDragonEyeTexture,
+  createRedDragonLidTexture,
   createReptileScaleTexture,
 } from './textures';
 
-export type OrbVariant = 'emerald' | 'amber' | 'ruby';
+export type OrbVariant = 'crimson' | 'ruby' | 'garnet';
 
 export interface AmberArrowRig {
   group: THREE.Group;
@@ -241,35 +242,32 @@ const ORB_PALETTES: Record<
     emissive: number;
     shell: number;
     light: number;
-    rgb: [number, number, number];
   }
 > = {
-  emerald: {
-    core: 0xa7f3d0,
-    emissive: 0x10b981,
-    shell: 0x34d399,
-    light: 0x10b981,
-    rgb: [0.08, 0.82, 0.56],
-  },
-  amber: {
-    core: 0xfef3c7,
-    emissive: 0xf59e0b,
-    shell: 0xfbbf24,
-    light: 0xf59e0b,
-    rgb: [0.98, 0.65, 0.12],
+  crimson: {
+    core: 0x7f1d1d,
+    emissive: 0xbe123c,
+    shell: 0xffffff,
+    light: 0xb91c1c,
   },
   ruby: {
-    core: 0xfecdd3,
+    core: 0x881337,
     emissive: 0xe11d48,
-    shell: 0xf43f5e,
-    light: 0xf43f5e,
-    rgb: [0.92, 0.16, 0.34],
+    shell: 0xffffff,
+    light: 0xc81e3a,
+  },
+  garnet: {
+    core: 0x6b0f1a,
+    emissive: 0x9f1239,
+    shell: 0xffffff,
+    light: 0x9f1239,
   },
 };
 
 /**
- * Tworzy trójwymiarową fosforyzującą kulę (nieaktywne Smocze Oko) z wyraźnym światłocieniem:
- * ciemniejszy cień od spodu zanurzonego w wodzie i jasny refleks na górnej kopule.
+ * Tworzy zamknięte Smocze Oko o dokładnie tej samej średnicy (1:1, promień 0.395)
+ * co otwarte Smocze Oko, w głębokich mrocznych odcieniach czerwieni i rubinu
+ * z ciemnym rowkiem zamkniętej powieki, łuskami i bocznym światłocieniem 3D.
  */
 export function createAbyssOrb(
   variant: OrbVariant,
@@ -277,38 +275,41 @@ export function createAbyssOrb(
 ): AbyssOrbRig {
   const palette = ORB_PALETTES[variant];
   const group = new THREE.Group();
-  const { bumpMap: scaleBump } = createReptileScaleTexture(maxAnisotropy);
+  const { map: lidMap, bumpMap: lidBump, emissiveMap: lidEmissiveMap } =
+    createRedDragonLidTexture(variant, maxAnisotropy);
 
-  // Subtelne żarzące jądro widoczne delikatnie od strony oświetlonej kopuły
+  // Subtelne wewnętrzne żarzące jądro rubinowe
   const coreMat = new THREE.MeshStandardMaterial({
     color: palette.core,
     emissive: palette.emissive,
-    emissiveIntensity: 0.85,
-    roughness: 0.25,
+    emissiveIntensity: 0.55,
+    roughness: 0.35,
     metalness: 0.1,
   });
   const coreMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(0.12, 20, 20),
+    new THREE.SphereGeometry(0.14, 16, 16),
     coreMat,
   );
   coreMesh.position.set(-0.04, 0.04, -0.03);
   group.add(coreMesh);
 
-  // Zewnętrzna kula (zamknięte Smocze Oko) z przestrzennym światłocieniem bocznym i łuskami
+  // Zewnętrzna powieka zamkniętego Smoczego Oka (średnica 1:1 z otwartym okiem: r = 0.395)
   const shellMat = new THREE.MeshPhysicalMaterial({
     color: palette.shell,
-    bumpMap: scaleBump,
-    bumpScale: 0.016,
-    emissive: palette.emissive,
-    emissiveIntensity: 0.16,
-    roughness: 0.15,
-    metalness: 0.14,
-    clearcoat: 1.0,
-    clearcoatRoughness: 0.04,
-    ior: 1.56,
+    map: lidMap,
+    bumpMap: lidBump,
+    bumpScale: 0.028,
+    emissiveMap: lidEmissiveMap,
+    emissive: new THREE.Color(palette.emissive),
+    emissiveIntensity: 0.72,
+    roughness: 0.38,
+    metalness: 0.1,
+    clearcoat: 0.42,
+    clearcoatRoughness: 0.24,
+    envMapIntensity: 0.28,
+    ior: 1.54,
   });
 
-  const [cr, cg, cb] = palette.rgb;
   shellMat.onBeforeCompile = (shader) => {
     shader.vertexShader =
       `
@@ -332,19 +333,18 @@ export function createAbyssOrb(
       '#include <color_fragment>',
       `
       #include <color_fragment>
-      // Wyraźny światłocień boczny 3D (półksiężyc głębokiego cienia z prawej-dolnej strony)
+      // Wyraźny światłocień boczny 3D (głęboki półksiężyc cienia i mroczna krwistoczerwona barwa)
       vec3 wn = normalize(vWorldNorm);
       vec3 keyDir = normalize(vec3(-0.74, 0.54, -0.42));
       float sideLit = dot(wn, keyDir);
-      float crescent = smoothstep(-0.34, 0.72, sideLit);
+      float crescent = smoothstep(-0.36, 0.74, sideLit);
       float submergeShade = smoothstep(-0.35, 0.35, wn.y);
-      float shade = crescent * (0.35 + 0.65 * submergeShade);
+      float shade = crescent * (0.24 + 0.76 * submergeShade);
 
-      vec3 deepShadow = vec3(0.012, 0.016, 0.028);
-      vec3 jewelColor = vec3(${cr.toFixed(2)}, ${cg.toFixed(2)}, ${cb.toFixed(2)});
-      // Subtelny blask krawędziowy (Fresnel) po stronie światła
-      float rim = pow(clamp(1.0 - max(0.0, wn.y), 0.0, 1.0), 2.4) * crescent * 0.35;
-      diffuseColor.rgb = mix(deepShadow, jewelColor * 1.12, shade) + jewelColor * rim;
+      vec3 deepShadow = vec3(0.012, 0.002, 0.004);
+      vec3 rubyRim = vec3(0.58, 0.06, 0.12);
+      float rim = pow(clamp(1.0 - max(0.0, wn.y), 0.0, 1.0), 2.6) * crescent * 0.24;
+      diffuseColor.rgb = mix(deepShadow, diffuseColor.rgb * 1.38, shade) + rubyRim * rim;
       `,
     );
 
@@ -353,36 +353,36 @@ export function createAbyssOrb(
       `
       #include <emissivemap_fragment>
       vec3 wne = normalize(vWorldNorm);
-      float eLit = smoothstep(-0.15, 0.78, dot(wne, normalize(vec3(-0.74, 0.54, -0.42))));
-      totalEmissiveRadiance *= (0.06 + 1.15 * eLit);
+      float eLit = smoothstep(-0.22, 0.78, dot(wne, normalize(vec3(-0.74, 0.54, -0.42))));
+      totalEmissiveRadiance *= (0.28 + 0.92 * eLit);
       `,
     );
   };
 
-  const shellMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(0.30, 36, 36),
-    shellMat,
-  );
+  // Obrót o 90° wokół X sprawia, że równik z rowkiem powieki biegnie centralnie przez szczyt oka
+  const shellGeo = new THREE.SphereGeometry(0.395, 36, 36);
+  shellGeo.rotateX(Math.PI / 2);
+  const shellMesh = new THREE.Mesh(shellGeo, shellMat);
   group.add(shellMesh);
 
-  // Ciemny menisk wodny na styku kuli z taflą wody
+  // Ciemny menisk wodny na styku zamkniętego oka z taflą wody
   const meniscusMat = new THREE.MeshBasicMaterial({
-    color: 0x020408,
+    color: 0x010204,
     transparent: true,
-    opacity: 0.55,
+    opacity: 0.6,
     depthWrite: false,
   });
   const meniscusRing = new THREE.Mesh(
-    new THREE.RingGeometry(0.27, 0.36, 32),
+    new THREE.RingGeometry(0.36, 0.46, 36),
     meniscusMat,
   );
   meniscusRing.rotation.x = -Math.PI / 2;
   meniscusRing.position.y = -0.02;
   group.add(meniscusRing);
 
-  // Niewidoczny powiększony hitbox do wygodnego klikania palcem
+  // Niewidoczny powiększony hitbox do wygodnego klikania palcem (1:1 z otwartym okiem)
   const hitMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(0.58, 12, 12),
+    new THREE.SphereGeometry(0.68, 12, 12),
     new THREE.MeshBasicMaterial({
       transparent: true,
       opacity: 0,
@@ -392,7 +392,7 @@ export function createAbyssOrb(
   );
   group.add(hitMesh);
 
-  const light = new THREE.PointLight(palette.light, 1.25, 3.6, 1.8);
+  const light = new THREE.PointLight(palette.light, 0.95, 3.2, 1.9);
   light.position.set(-0.28, 0.42, -0.18);
   group.add(light);
 

@@ -70,7 +70,7 @@ interface ActiveDragonEye {
 
 const MAX_RIPPLES = 16;
 const SURFACE_Y_ARROW = 0.032;
-const SURFACE_Y_ORB = 0.08;
+const SURFACE_Y_ORB = 0.10;
 const SLEEP_TIMEOUT_MS = 15000;
 const _raycaster = new THREE.Raycaster();
 const _pointer = new THREE.Vector2();
@@ -119,6 +119,9 @@ export class BlackWaterScene {
   private arrowAngleRad = 0;
   private arrowOmega = 0;
   private arrowGlow = 0;
+  private filteredCompassAngleRad = 0;
+  private deadzoneTargetRelDeg = 0;
+  private hasInitFilteredAngle = false;
 
   // Stany kompasu i wyciszenie po 3–4 stuknięciach o krawędź
   private activated = false;
@@ -145,6 +148,14 @@ export class BlackWaterScene {
   private waitingMotionAfterScare = false;
   private lastEmptyTapTime = 0;
 
+  // Ręczne przeciąganie kompasu (tryb ręczny / kalibracji)
+  private pointerDownActive = false;
+  private dragPointerId = -1;
+  private dragStartX = 0;
+  private dragStartY = 0;
+  private lastDragX = 0;
+  private didDrag = false;
+
   // Czasy i callbacki
   private clock = new THREE.Clock();
   private elapsed = 0;
@@ -152,10 +163,13 @@ export class BlackWaterScene {
   private getSnapshot: () => SensorSnapshot;
   private onMotion: () => void;
   private onHudUpdate: (hud: SceneHudState) => void;
+  private onManualDrag?: (deltaHeadingDeg: number) => void;
 
   // Handlery zdarzeń
   private boundResize: () => void;
   private boundPointerDown: (e: PointerEvent) => void;
+  private boundPointerMove: (e: PointerEvent) => void;
+  private boundPointerUp: (e: PointerEvent) => void;
   private boundDblClick: (e: MouseEvent) => void;
   private boundContextLost: (e: Event) => void;
 
@@ -164,11 +178,13 @@ export class BlackWaterScene {
     getSnapshot: () => SensorSnapshot,
     onMotion: () => void,
     onHudUpdate: (hud: SceneHudState) => void,
+    onManualDrag?: (deltaHeadingDeg: number) => void,
   ) {
     this.container = container;
     this.getSnapshot = getSnapshot;
     this.onMotion = onMotion;
     this.onHudUpdate = onHudUpdate;
+    this.onManualDrag = onManualDrag;
 
     // 1. Detekcja Software WebGL (SwiftShader / llvmpipe / WARP)
     this.isSoftwareGl = (() => {
@@ -242,6 +258,8 @@ export class BlackWaterScene {
       this.updateViewportBounds(w, h);
     };
     this.boundPointerDown = (e) => this.handlePointerDown(e);
+    this.boundPointerMove = (e) => this.handlePointerMove(e);
+    this.boundPointerUp = (e) => this.handlePointerUp(e);
     this.boundDblClick = (e) => this.handleDoubleClick(e);
     this.boundContextLost = (e) => {
       e.preventDefault();
@@ -249,6 +267,9 @@ export class BlackWaterScene {
 
     window.addEventListener('resize', this.boundResize);
     this.renderer.domElement.addEventListener('pointerdown', this.boundPointerDown);
+    window.addEventListener('pointermove', this.boundPointerMove);
+    window.addEventListener('pointerup', this.boundPointerUp);
+    window.addEventListener('pointercancel', this.boundPointerUp);
     this.renderer.domElement.addEventListener('dblclick', this.boundDblClick);
     this.renderer.domElement.addEventListener('webglcontextlost', this.boundContextLost);
 
@@ -256,15 +277,16 @@ export class BlackWaterScene {
   }
 
   private setupLighting(): void {
-    const hemi = new THREE.HemisphereLight(0x8aa4d6, 0x060402, 1.05);
+    // Stonowane światło otoczenia, aby tafla zachowała smolistą czerń #010204
+    const hemi = new THREE.HemisphereLight(0x3a4866, 0x030201, 0.48);
     this.scene.add(hemi);
 
-    // Kontrastowy kierunkowy klucz tworzący świetliste refleksy na grzbietach fal i kulach
-    const key = new THREE.DirectionalLight(0xffebc2, 2.1);
+    // Kontrastowy kierunkowy klucz tworzący wąskie błyski na grzbietach fal oraz światłocień 3D
+    const key = new THREE.DirectionalLight(0xffebc2, 2.2);
     key.position.set(3.2, 9.5, -4.0);
     this.scene.add(key);
 
-    const rim = new THREE.DirectionalLight(0xb5d3ff, 1.15);
+    const rim = new THREE.DirectionalLight(0x5b6e8c, 0.42);
     rim.position.set(-4.5, 6.5, 4.5);
     this.scene.add(rim);
   }
@@ -303,15 +325,15 @@ export class BlackWaterScene {
     geo.rotateX(-Math.PI / 2);
     geo.computeVertexNormals();
 
-      const mat = new THREE.MeshPhysicalMaterial({
-      color: new THREE.Color(0x020408),
-      roughness: 0.05,
-      metalness: 0.28,
-      clearcoat: 1.0,
-      clearcoatRoughness: 0.025,
-      envMapIntensity: 2.35,
+    const mat = new THREE.MeshPhysicalMaterial({
+      color: new THREE.Color(0x010204),
+      roughness: 0.34,
+      metalness: 0.04,
+      clearcoat: 0.35,
+      clearcoatRoughness: 0.14,
+      envMapIntensity: 0.14,
       transparent: true,
-      opacity: 0.72,
+      opacity: 0.84,
       depthWrite: false,
       flatShading: false,
     });
@@ -433,18 +455,18 @@ export class BlackWaterScene {
         `,
       );
 
-      // Srebrzysto-złoty połysk na grzbietach fal + świetlisty kilwater wzdłuż rozchodzących się zmarszczek
+      // Wąskie, ostre błyski wyłącznie na najwyższych grzbietach fal wobec smolistej czerni #010204
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <emissivemap_fragment>',
         `
         #include <emissivemap_fragment>
         float crestSlope = clamp(length(vec2(fhC - fhX, fhC - fhZ)) / fEps, 0.0, 1.0);
-        float crestPeak = smoothstep(0.008, 0.042, fhC);
-        float glint = pow(crestSlope, 1.65) * (0.35 + 0.65 * crestPeak);
-        vec3 silverGold = mix(vec3(0.45, 0.54, 0.72), vec3(0.96, 0.75, 0.34), crestPeak);
+        float crestPeak = smoothstep(0.020, 0.044, fhC);
+        float glint = pow(crestSlope, 3.2) * crestPeak;
+        vec3 silverGold = mix(vec3(0.42, 0.46, 0.56), vec3(0.88, 0.65, 0.28), crestPeak);
         float wakeLum = evalWakeGlow(vWaterXZ, uTime);
-        vec3 wakeColor = vec3(0.86, 0.72, 0.42);
-        totalEmissiveRadiance += silverGold * glint * 0.24 + wakeColor * wakeLum * 0.22;
+        vec3 wakeColor = vec3(0.82, 0.64, 0.32);
+        totalEmissiveRadiance += silverGold * glint * 0.20 + wakeColor * wakeLum * 0.18;
         `,
       );
     };
@@ -528,7 +550,10 @@ export class BlackWaterScene {
     this.waitingMotionAfterScare = false;
 
     const snap = this.getSnapshot();
-    this.arrowAngleRad = -THREE.MathUtils.degToRad(snap.relativeAngleDeg);
+    this.deadzoneTargetRelDeg = snap.relativeAngleDeg;
+    this.filteredCompassAngleRad = -THREE.MathUtils.degToRad(snap.relativeAngleDeg);
+    this.hasInitFilteredAngle = true;
+    this.arrowAngleRad = this.filteredCompassAngleRad;
     this.arrowOmega = 0;
     this.arrowX = 0;
     this.arrowZ = 0;
@@ -595,16 +620,64 @@ export class BlackWaterScene {
     if (!this.activated) return;
     this.onMotion();
 
+    const snap = this.getSnapshot();
+    this.pointerDownActive = true;
+    this.dragPointerId = e.pointerId;
+    this.dragStartX = e.clientX;
+    this.dragStartY = e.clientY;
+    this.lastDragX = e.clientX;
+    this.didDrag = false;
+
+    // W trybie ręcznym najpierw sprawdzamy przeciąganie (dotyk/klik obsłużymy przy puszczeniu, jeśli nie było ruchu)
+    if (snap.compassMode === 'manual') {
+      return;
+    }
+
+    this.processWaterOrOrbTap(e.clientX, e.clientY);
+  }
+
+  private handlePointerMove(e: PointerEvent): void {
+    if (!this.activated || !this.pointerDownActive || e.pointerId !== this.dragPointerId) {
+      return;
+    }
+    const snap = this.getSnapshot();
+    if (snap.compassMode !== 'manual') return;
+
+    const totalDist = Math.hypot(e.clientX - this.dragStartX, e.clientY - this.dragStartY);
+    if (!this.didDrag && totalDist > 6) {
+      this.didDrag = true;
+    }
+
+    if (this.didDrag) {
+      const dx = e.clientX - this.lastDragX;
+      this.lastDragX = e.clientX;
+      const spanPx = Math.max(260, Math.min(window.innerWidth || 380, 520));
+      const deltaHeadingDeg = -(dx / spanPx) * 260;
+      this.onManualDrag?.(deltaHeadingDeg);
+    }
+  }
+
+  private handlePointerUp(e: PointerEvent): void {
+    if (!this.pointerDownActive || e.pointerId !== this.dragPointerId) return;
+    const snap = this.getSnapshot();
+    if (this.activated && snap.compassMode === 'manual' && !this.didDrag) {
+      this.processWaterOrOrbTap(e.clientX, e.clientY);
+    }
+    this.pointerDownActive = false;
+    this.didDrag = false;
+  }
+
+  private processWaterOrOrbTap(clientX: number, clientY: number): void {
     const rect = this.renderer.domElement.getBoundingClientRect();
-    _pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-    _pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    _pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    _pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
 
     _raycaster.setFromCamera(_pointer, this.camera);
     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     const waterHit = new THREE.Vector3();
     _raycaster.ray.intersectPlane(plane, waterHit);
 
-    const hit = this.raycastInteractive(e.clientX, e.clientY);
+    const hit = this.raycastInteractive(clientX, clientY);
     const nowPerf = performance.now();
 
     if (hit === 'dragonEye' && this.dragonEye && this.dragonEye.state !== 'fleeing') {
@@ -727,7 +800,7 @@ export class BlackWaterScene {
   }
 
   private spawnSurfaceOrbImmediately(): void {
-    const variants: OrbVariant[] = ['emerald', 'amber', 'ruby'];
+    const variants: OrbVariant[] = ['crimson', 'ruby', 'garnet'];
     const variant = variants[Math.floor(Math.random() * variants.length)];
     const rig = createAbyssOrb(variant, this.renderer.capabilities.getMaxAnisotropy());
 
@@ -750,7 +823,7 @@ export class BlackWaterScene {
       vz: THREE.MathUtils.randFloat(-0.22, 0.22),
       rotY: Math.random() * Math.PI * 2,
       rotVelY: THREE.MathUtils.randFloat(-0.4, 0.4),
-      radius: 0.31,
+      radius: 0.4,
       lastBumpSound: 0,
       state: 'floating',
       tappedGlass: true,
@@ -761,7 +834,7 @@ export class BlackWaterScene {
   }
 
   private spawnRandomOrb(): void {
-    const variants: OrbVariant[] = ['emerald', 'amber', 'ruby'];
+    const variants: OrbVariant[] = ['crimson', 'ruby', 'garnet'];
     const variant = variants[Math.floor(Math.random() * variants.length)];
     const rig = createAbyssOrb(variant, this.renderer.capabilities.getMaxAnisotropy());
 
@@ -786,7 +859,7 @@ export class BlackWaterScene {
       vz: THREE.MathUtils.randFloat(-0.28, 0.28),
       rotY: Math.random() * Math.PI * 2,
       rotVelY: THREE.MathUtils.randFloat(-0.5, 0.5),
-      radius: 0.31,
+      radius: 0.4,
       lastBumpSound: 0,
       state: 'rising',
       tappedGlass: false,
@@ -940,6 +1013,49 @@ export class BlackWaterScene {
       this.phase = 'seeking';
     }
 
+    // 1. Strefa martwa (±4°) + silne wygładzanie kątowe (najkrótsza droga po okręgu z lerp = 0.05) + limit prędkości obrotu na klatkę
+    const isManualMode = snapshot.compassMode === 'manual';
+    if (!this.hasInitFilteredAngle) {
+      this.deadzoneTargetRelDeg = snapshot.relativeAngleDeg;
+      this.filteredCompassAngleRad = -THREE.MathUtils.degToRad(snapshot.relativeAngleDeg);
+      this.hasInitFilteredAngle = true;
+    }
+
+    if (isManualMode) {
+      this.deadzoneTargetRelDeg = snapshot.relativeAngleDeg;
+    } else {
+      const relDiff = normalizeSignedAngle(
+        snapshot.relativeAngleDeg - this.deadzoneTargetRelDeg,
+      );
+      if (Math.abs(relDiff) >= 4) {
+        this.deadzoneTargetRelDeg = snapshot.relativeAngleDeg;
+      }
+    }
+
+    const desiredTargetRad = -THREE.MathUtils.degToRad(this.deadzoneTargetRelDeg);
+    const frameScale = Math.max(0.25, dt * 60);
+    const baseLerp = isManualMode ? 0.22 : 0.05;
+    const lerpAlpha = 1 - Math.pow(1 - baseLerp, frameScale);
+    const shortestArc = Math.atan2(
+      Math.sin(desiredTargetRad - this.filteredCompassAngleRad),
+      Math.cos(desiredTargetRad - this.filteredCompassAngleRad),
+    );
+    const maxFilterStepRad =
+      THREE.MathUtils.degToRad(isManualMode ? 8.5 : 2.8) * frameScale;
+    const clampedFilterStep = THREE.MathUtils.clamp(
+      shortestArc * lerpAlpha,
+      -maxFilterStepRad,
+      maxFilterStepRad,
+    );
+    this.filteredCompassAngleRad = Math.atan2(
+      Math.sin(this.filteredCompassAngleRad + clampedFilterStep),
+      Math.cos(this.filteredCompassAngleRad + clampedFilterStep),
+    );
+
+    const smoothedRelDeg = normalizeSignedAngle(
+      -THREE.MathUtils.radToDeg(this.filteredCompassAngleRad),
+    );
+
     // Reset licznika 3–4 uderzeń wyłącznie po wyraźnym obrocie (> 20°) lub potrząśnięciu
     const headingShift = Math.abs(
       normalizeSignedAngle(snapshot.compassHeadingDeg - this.tapRefHeadingDeg),
@@ -957,8 +1073,7 @@ export class BlackWaterScene {
       this.nextSeekTapTime = this.elapsed + 0.14;
     }
 
-    const relDeg = snapshot.relativeAngleDeg;
-    const absRel = Math.abs(relDeg);
+    const absRel = Math.abs(smoothedRelDeg);
 
     if (this.phase === 'locked' || this.phase === 'locking') {
       if (absRel > 10) {
@@ -978,15 +1093,25 @@ export class BlackWaterScene {
       this.phase = 'seeking';
     }
 
-    // Duża bezwładność obrotowa w gęstej cieczy
-    const desiredRotY = -THREE.MathUtils.degToRad(relDeg);
+    // Duża bezwładność obrotowa w gęstej cieczy + ograniczenie maksymalnej prędkości obrotu na klatkę
     const rotDelta = Math.atan2(
-      Math.sin(desiredRotY - this.arrowAngleRad),
-      Math.cos(desiredRotY - this.arrowAngleRad),
+      Math.sin(this.filteredCompassAngleRad - this.arrowAngleRad),
+      Math.cos(this.filteredCompassAngleRad - this.arrowAngleRad),
     );
-    this.arrowOmega += rotDelta * 14.5 * dt;
-    this.arrowOmega *= Math.exp(-5.0 * dt);
-    this.arrowAngleRad += this.arrowOmega * dt;
+    this.arrowOmega += rotDelta * (isManualMode ? 16.0 : 12.0) * dt;
+    this.arrowOmega *= Math.exp(-(isManualMode ? 5.6 : 5.2) * dt);
+    const maxOmega = isManualMode ? 4.8 : 2.4;
+    this.arrowOmega = THREE.MathUtils.clamp(this.arrowOmega, -maxOmega, maxOmega);
+    const maxAngleStep = THREE.MathUtils.degToRad(isManualMode ? 7.0 : 2.8) * frameScale;
+    const clampedAngleStep = THREE.MathUtils.clamp(
+      this.arrowOmega * dt,
+      -maxAngleStep,
+      maxAngleStep,
+    );
+    this.arrowAngleRad = Math.atan2(
+      Math.sin(this.arrowAngleRad + clampedAngleStep),
+      Math.cos(this.arrowAngleRad + clampedAngleStep),
+    );
 
     const dirX = Math.sin(-this.arrowAngleRad);
     const dirZ = -Math.cos(-this.arrowAngleRad);
@@ -1362,11 +1487,11 @@ export class BlackWaterScene {
       orb.rig.group.rotation.set(tiltX, orb.rotY, tiltZ);
 
       const pulse = 0.9 + Math.sin(this.elapsed * 2.6 + orb.bobPhase) * 0.1;
-      orb.rig.coreMat.emissiveIntensity = 0.9 * pulse;
+      orb.rig.coreMat.emissiveIntensity = 0.55 * pulse;
       orb.rig.light.intensity =
-        THREE.MathUtils.clamp((orb.y + 2.5) / 2.6, 0, 1) * 1.25 * pulse;
+        THREE.MathUtils.clamp((orb.y + 2.5) / 2.6, 0, 1) * 0.95 * pulse;
       orb.rig.meniscusMat.opacity =
-        THREE.MathUtils.clamp((orb.y + 0.35) / 0.5, 0, 1) * 0.55;
+        THREE.MathUtils.clamp((orb.y + 0.35) / 0.5, 0, 1) * 0.6;
 
       if (orb.y < -3.35 && orb.state === 'sinking') {
         this.scene.remove(orb.rig.group);
@@ -1513,6 +1638,9 @@ export class BlackWaterScene {
 
     window.removeEventListener('resize', this.boundResize);
     this.renderer.domElement.removeEventListener('pointerdown', this.boundPointerDown);
+    window.removeEventListener('pointermove', this.boundPointerMove);
+    window.removeEventListener('pointerup', this.boundPointerUp);
+    window.removeEventListener('pointercancel', this.boundPointerUp);
     this.renderer.domElement.removeEventListener('dblclick', this.boundDblClick);
     this.renderer.domElement.removeEventListener('webglcontextlost', this.boundContextLost);
 
